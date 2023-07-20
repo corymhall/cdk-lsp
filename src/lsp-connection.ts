@@ -26,15 +26,13 @@ export function createLspConnection(_options: LspConnectionOptions): lsp.Connect
   // connection.onDidChangeConfiguration(server.didChangeConfiguration.bind(server));
 
   connection.onDidOpenTextDocument(server.didOpenTextDocument.bind(server));
-  // connection.onDidSaveTextDocument(server.didSaveTextDocument.bind(server));
-  // connection.onDidCloseTextDocument(server.didCloseTextDocument.bind(server));
-  // connection.onDidChangeTextDocument(server.didChangeTextDocument.bind(server));
+  connection.onDidSaveTextDocument(server.didSaveTextDocument.bind(server));
+  connection.onDidCloseTextDocument(server.didCloseTextDocument.bind(server));
+  connection.onDidChangeTextDocument(server.didChangeTextDocument.bind(server));
 
-  // connection.onCodeAction(server.codeAction.bind(server));
-  // connection.onCompletion(server.completion.bind(server));
-  // connection.onCompletionResolve(server.completionResolve.bind(server));
+  connection.onCodeAction(server.codeAction.bind(server));
   // connection.onDefinition(server.definition.bind(server));
-  // connection.onImplementation(server.implementation.bind(server));
+  connection.onImplementation(server.implementation.bind(server));
   // connection.onTypeDefinition(server.typeDefinition.bind(server));
   // connection.onDocumentFormatting(server.documentFormatting.bind(server));
   // connection.onDocumentRangeFormatting(server.documentRangeFormatting.bind(server));
@@ -49,9 +47,11 @@ export function createLspConnection(_options: LspConnectionOptions): lsp.Connect
   // connection.onSignatureHelp(server.signatureHelp.bind(server));
   // connection.onWorkspaceSymbol(server.workspaceSymbol.bind(server));
   // connection.onFoldingRanges(server.foldingRanges.bind(server));
-  // connection.languages.callHierarchy.onPrepare(server.prepareCallHierarchy.bind(server));
-  // connection.languages.callHierarchy.onIncomingCalls(server.callHierarchyIncomingCalls.bind(server));
-  // connection.languages.callHierarchy.onOutgoingCalls(server.callHierarchyOutgoingCalls.bind(server));
+  connection.languages.callHierarchy.onPrepare(server.prepareCallHierarchy.bind(server));
+  connection.languages.callHierarchy.onIncomingCalls(server.callHierarchyIncomingCalls.bind(server));
+  connection.languages.callHierarchy.onOutgoingCalls(server.callHierarchyOutgoingCalls.bind(server));
+  // connection.languages.typeHierarchy.onPrepare(server.prepareTypeHierarchy.bind(server));
+  // connection.languages.typeHierarchy.onSubtypes(server.typeHierarchySubtypes.bind(server));
   // connection.languages.inlayHint.on(server.inlayHints.bind(server));
   // connection.languages.semanticTokens.on(server.semanticTokensFull.bind(server));
   // connection.languages.semanticTokens.onRange(server.semanticTokensRange.bind(server));

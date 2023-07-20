@@ -30,6 +30,7 @@
     ".projenrc.js",
     "src/**/*.ts",
     "test/**/*.ts",
+    "typings.d.ts",
     ".projenrc.ts",
     "projenrc/**/*.ts"
   ],

@@ -1,6 +1,6 @@
-import { typescript } from 'projen';
 import { TypeScriptModuleResolution } from 'projen/lib/javascript/index.js';
-const project = new typescript.TypeScriptProject({
+import { TypeScriptProject } from 'projen/lib/typescript/index.js';
+const project = new TypeScriptProject({
   defaultReleaseBranch: 'main',
   name: 'cdk-lsp',
   projenrcTs: true,
@@ -9,6 +9,9 @@ const project = new typescript.TypeScriptProject({
   },
   autoDetectBin: false,
   deps: [
+    'openai',
+    'tree-sitter',
+    'tree-sitter-typescript',
     'vscode-languageserver-protocol',
     'p-debounce',
     'commander',
@@ -25,6 +28,7 @@ const project = new typescript.TypeScriptProject({
   tsconfigDev: {
     compilerOptions: {
       target: 'es2020',
+      esModuleInterop: true,
       lib: ['es2020'],
       module: 'es2020',
       moduleResolution: TypeScriptModuleResolution.NODE_NEXT,
@@ -36,12 +40,20 @@ const project = new typescript.TypeScriptProject({
   // devDeps: [],             /* Build dependencies for this module. */
   // packageName: undefined,  /* The "name" in package.json. */
 });
+project.tsconfig?.addInclude('typings.d.ts');
+project.tsconfigDev?.addInclude('typings.d.ts');
 project.bundler.addBundle('src/cli.ts', {
   target: 'node2020',
+  sourcemap: true,
+  externals: ['tree-sitter', 'tree-sitter-typescript'],
   outfile: 'cli.cjs',
   tsconfigPath: 'tsconfig.dev.json',
   platform: 'node',
+  loaders: {
+    node: 'copy',
+  },
 });
+// TODO: copy over node modules as part of bundle for externals
 project.package.addField('type', 'module');
 project.defaultTask?.reset();
 project.defaultTask?.exec('ts-node --esm --project tsconfig.dev.json .projenrc.ts');

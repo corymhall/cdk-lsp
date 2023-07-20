@@ -1,11 +1,12 @@
 import debounce from 'p-debounce';
 import * as lsp from 'vscode-languageserver/node';
+import { Cdk } from './cdk/cdk.js';
 import { CdkInitializeParams/* , SupportedFeatures  */ } from './cdk-protocol.js';
-import { Cdk } from './cdk.js';
 import { DiagnosticEventQueue } from './diagnostic-queue.js';
 import { LspDocuments } from './documents.js';
 import { LspClient } from './lsp-client.js';
-import { uriToPath } from './protocol-translation.js';
+import { pathToUri, uriToPath } from './protocol-translation.js';
+import { ConstructNapper } from './treesitter.js';
 
 export interface CdkServiceConfiguration {
   lspClient: LspClient;
@@ -24,17 +25,28 @@ export const Commands = {
 export class LspServer {
   // private features: SupportedFeatures = {};
   private initializeParams: CdkInitializeParams | undefined = undefined;
-  private readonly cdk: Cdk;
+  private _cdk?: Cdk;
   private readonly documents = new LspDocuments();
   private diagnosticQueue?: DiagnosticEventQueue;
   public readonly doRequestDiagnosticsDebounced = debounce(() => this.doRequestDiagnostics(), 200);
   protected diagnosticsTokenSource: lsp.CancellationTokenSource | undefined;
   pendingDebouncedRequest = false;
   constructor(private options: CdkServiceConfiguration) {
-    this.cdk = new Cdk();
 
   }
+  public get cdk(): Cdk {
+    if (!this._cdk) throw new Error('CDK Project has not been initialized!');
+    return this._cdk;
+  }
   async initialize(params: CdkInitializeParams): Promise<lsp.InitializeResult> {
+
+    const root = params.rootUri ? uriToPath(params.rootUri) : params.rootPath || undefined;
+    console.error(params, root);
+    if (!root) {
+      throw new Error('could not find workspace root');
+    }
+
+    this._cdk = new Cdk(root);
 
     this.diagnosticQueue = new DiagnosticEventQueue(
       diagnostics => this.options.lspClient.publishDiagnostics(diagnostics),
@@ -46,10 +58,6 @@ export class LspServer {
     const initializeResult: lsp.InitializeResult = {
       capabilities: {
         textDocumentSync: lsp.TextDocumentSyncKind.Incremental,
-        // completionProvider: {
-        //   triggerCharacters: ['.', '"', '\'', '/', '@', '<'],
-        //   resolveProvider: true,
-        // },
         codeActionProvider: clientCapabilities.textDocument?.codeAction?.codeActionLiteralSupport
           ? {
             codeActionKinds: [
@@ -80,6 +88,7 @@ export class LspServer {
         workspaceSymbolProvider: true,
         implementationProvider: true,
         typeDefinitionProvider: true,
+        callHierarchyProvider: true,
         foldingRangeProvider: true,
         workspace: { },
       },
@@ -87,17 +96,9 @@ export class LspServer {
     return initializeResult;
   }
   public initialized(_: lsp.InitializedParams): void {
-    // const { apiVersion, typescriptVersionSource } = this.tspClient;
-    // this.options.lspClient.sendNotification(TypescriptVersionNotification, {
-    //   version: apiVersion.displayName,
-    //   source: typescriptVersionSource,
-    // });
+    // TODO
   }
 
-  // public codeAction(params: lsp.CodeActionParams, token?: lsp.CancellationToken): Promise<lsp.CodeAction[]> {
-  //   const file = uriToPath(params.textDocument.uri);
-  //   // lsp.CodeAction.create('action').command = lsp.Command.create()
-  // }
   protected async interuptDiagnostics<R>(f: () => R): Promise<R> {
     if (!this.diagnosticsTokenSource) {
       return f();
@@ -115,9 +116,6 @@ export class LspServer {
   }
   protected async doRequestDiagnostics(): Promise<void> {
     this.cancelDiagnostics();
-    // if (this.hasShutDown) {
-    //     return;
-    // }
     const geterrTokenSource = new lsp.CancellationTokenSource();
     this.diagnosticsTokenSource = geterrTokenSource;
 
@@ -146,7 +144,177 @@ export class LspServer {
     if (this.documents.open(file, params.textDocument)) {
       this.cancelDiagnostics();
       void this.requestDiagnostics();
+    } else {
+
     }
+  }
+
+  didCloseTextDocument(params: lsp.DidCloseTextDocumentParams): void {
+    const file = uriToPath(params.textDocument.uri);
+    if (!file) {
+      return;
+    }
+    this.closeDocument(file);
+  }
+
+  protected closeDocument(file: string): void {
+    const document = this.documents.close(file);
+    if (!document) {
+      return;
+    }
+    // we won't be updating diagnostics anymore for that file, so clear them
+    // so we don't leave stale ones
+    this.options.lspClient.publishDiagnostics({
+      diagnostics: [],
+      uri: file,
+    });
+  }
+
+  didChangeTextDocument(params: lsp.DidChangeTextDocumentParams): void {
+    const { textDocument } = params;
+    const file = uriToPath(textDocument.uri);
+    if (!file) {
+      return;
+    }
+
+    const document = this.documents.get(file);
+    if (!document) {
+      console.error(`Received change on non-opened document ${textDocument.uri}`);
+      throw new Error(`Received change on non-opened document ${textDocument.uri}`);
+    }
+
+    for (const change of params.contentChanges) {
+      document.applyEdit(textDocument.version, change);
+      // TODO: should we re-synth?
+    }
+    this.cancelDiagnostics();
+    void this.requestDiagnostics();
+  }
+
+  didSaveTextDocument(_params: lsp.DidSaveTextDocumentParams): void {
+    // TODO: should we re-synth?
+  }
+
+  public async codeAction(params: lsp.CodeActionParams, _token?: lsp.CancellationToken): Promise<lsp.CodeAction[]> {
+    const file = uriToPath(params.textDocument.uri);
+    if (!file) {
+      return [];
+    }
+    const actions: lsp.CodeAction[] = [];
+
+    if (!this.pendingDebouncedRequest) {
+      const diagnostics = this.diagnosticQueue?.getDiagnosticsForFile(file) || [];
+      if (diagnostics.length) {
+        const napper = new ConstructNapper();
+        const diagActions = await Promise.all(diagnostics.map(diag => {
+          const doc = this.documents.get(file);
+          const docEnd = doc?.getFullRange().end;
+          const text = doc?.getText({
+            start: diag.range.start,
+            end: docEnd!,
+          });
+          return napper.getCodeFixForConstruct(text!, diag.range, params.textDocument.uri, diag);
+        }));
+        actions.push(...(diagActions.filter(action => !!action) as lsp.CodeAction[]));
+      }
+    }
+    return actions;
+  }
+
+  // async prepareTypeHierarchy(params: lsp.TypeHierarchyPrepareParams, _token?: lsp.CancellationToken): Promise<lsp.TypeHierarchyItem[] | null> {
+  //   const file = uriToPath(params.textDocument.uri);
+  //   console.error('prepareCallHierarchy called!');
+  //   if (!file) {
+  //     return null;
+  //   }
+  //   return this.getTypeHierarchyItems(file, params.position);
+  // }
+
+  // async typeHierarchySubtypes(params: lsp.TypeHierarchySubtypesParams, _token?: lsp.CancellationToken): Promise<lsp.TypeHierarchyItem[] | null> {
+  //   const file = uriToPath(params.item.uri);
+  //   console.error('typeHierarchySubtypes called!');
+  //   if (!file) {
+  //     return null;
+  //   }
+  //   return this.getTypeHierarchyItems(file, params.item.range.start);
+  // }
+
+  getLocationLinks(uri: string, position: lsp.Position): lsp.LocationLink[] | undefined {
+    const uriGenerator = (filePath: string): string => {
+      const newPath = pathToUri(filePath, this.documents);
+      return newPath;
+    };
+    const start = position;
+    const nodeTree = this.cdk.getNodeResources(uri, {
+      character: start.character,
+      line: start.line,
+    }, uriGenerator);
+    return nodeTree;
+  }
+
+
+  async implementation(params: lsp.TextDocumentPositionParams, _token?: lsp.CancellationToken): Promise<lsp.LocationLink[] | undefined> {
+    const file = uriToPath(params.textDocument.uri);
+    if (!file) {
+      return [];
+    }
+    return this.getLocationLinks(file, params.position);
+  }
+
+  async prepareCallHierarchy(params: lsp.CallHierarchyPrepareParams, _token?: lsp.CancellationToken): Promise<lsp.CallHierarchyItem[] | null> {
+    const file = uriToPath(params.textDocument.uri);
+    console.error('prepareCallHierarchy called!');
+    if (!file) {
+      return null;
+    }
+    const uriGenerator = (filePath: string): string => {
+      const newPath = pathToUri(filePath, this.documents);
+      return newPath;
+    };
+    const start = params.position;
+    const nodeTree = this.cdk.getNodeTree(file, {
+      character: start.character,
+      line: start.line,
+    }, uriGenerator);
+    return nodeTree;
+  }
+
+  async callHierarchyIncomingCalls(
+    params: lsp.CallHierarchyIncomingCallsParams,
+    _token?: lsp.CancellationToken,
+  ): Promise<lsp.CallHierarchyIncomingCall[] | null> {
+    console.error('callHierarchyIncomingCalls called!');
+    const file = uriToPath(params.item.uri);
+    if (!file) {
+      return null;
+    }
+    const uriGenerator = (filePath: string): string => {
+      const newPath = pathToUri(filePath, this.documents);
+      return newPath;
+    };
+    return this.cdk.getNodeParents(file, {
+      character: params.item.range.start.character,
+      line: params.item.range.start.line,
+    }, uriGenerator);
+  }
+
+  async callHierarchyOutgoingCalls(
+    params: lsp.CallHierarchyOutgoingCallsParams,
+    _token?: lsp.CancellationToken,
+  ): Promise<lsp.CallHierarchyOutgoingCall[] | null> {
+    console.error('callHierarchyOutgoingCalls called!');
+    const file = uriToPath(params.item.uri);
+    if (!file) {
+      return null;
+    }
+    const uriGenerator = (filePath: string): string => {
+      const newPath = pathToUri(filePath, this.documents);
+      return newPath;
+    };
+    return this.cdk.getNodeChildren(file, {
+      character: params.item.range.start.character,
+      line: params.item.range.start.line,
+    }, uriGenerator);
   }
 }
 

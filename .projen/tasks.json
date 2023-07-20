@@ -55,7 +55,7 @@
       "description": "Create a JavaScript bundle from src/cli.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/cli.ts --target=\"node2020\" --platform=\"node\" --outfile=\"assets/cli/cli.cjs\" --tsconfig=\"tsconfig.dev.json\""
+          "exec": "esbuild --bundle src/cli.ts --target=\"node2020\" --platform=\"node\" --outfile=\"assets/cli/cli.cjs\" --tsconfig=\"tsconfig.dev.json\" --external:tree-sitter --external:tree-sitter-typescript --sourcemap --loader:.node=copy"
         }
       ]
     },
@@ -64,7 +64,7 @@
       "description": "Continuously update the JavaScript bundle from src/cli.ts",
       "steps": [
         {
-          "exec": "esbuild --bundle src/cli.ts --target=\"node2020\" --platform=\"node\" --outfile=\"assets/cli/cli.cjs\" --tsconfig=\"tsconfig.dev.json\" --watch"
+          "exec": "esbuild --bundle src/cli.ts --target=\"node2020\" --platform=\"node\" --outfile=\"assets/cli/cli.cjs\" --tsconfig=\"tsconfig.dev.json\" --external:tree-sitter --external:tree-sitter-typescript --sourcemap --loader:.node=copy --watch"
         }
       ]
     },

@@ -93,7 +93,19 @@
       "type": "runtime"
     },
     {
+      "name": "openai",
+      "type": "runtime"
+    },
+    {
       "name": "p-debounce",
+      "type": "runtime"
+    },
+    {
+      "name": "tree-sitter",
+      "type": "runtime"
+    },
+    {
+      "name": "tree-sitter-typescript",
       "type": "runtime"
     },
     {
