@@ -66,11 +66,11 @@ export class LspServer {
               lsp.CodeActionKind.RefactorRewrite,
             ],
           } : true,
-        definitionProvider: true,
-        documentFormattingProvider: true,
-        documentRangeFormattingProvider: true,
-        documentHighlightProvider: true,
-        documentSymbolProvider: true,
+        definitionProvider: false,
+        documentFormattingProvider: false,
+        documentRangeFormattingProvider: false,
+        documentHighlightProvider: false,
+        documentSymbolProvider: false,
         executeCommandProvider: {
           commands: [
             Commands.APPLY_WORKSPACE_EDIT,
@@ -81,15 +81,15 @@ export class LspServer {
             Commands.APPLY_RENAME_FILE,
           ],
         },
-        hoverProvider: true,
-        inlayHintProvider: true,
-        referencesProvider: true,
-        selectionRangeProvider: true,
-        workspaceSymbolProvider: true,
+        hoverProvider: false,
+        inlayHintProvider: false,
+        referencesProvider: false,
+        selectionRangeProvider: false,
+        workspaceSymbolProvider: false,
         implementationProvider: true,
-        typeDefinitionProvider: true,
+        typeDefinitionProvider: false,
         callHierarchyProvider: true,
-        foldingRangeProvider: true,
+        foldingRangeProvider: false,
         workspace: { },
       },
     };
@@ -115,6 +115,7 @@ export class LspServer {
     await this.doRequestDiagnosticsDebounced();
   }
   protected async doRequestDiagnostics(): Promise<void> {
+    console.error('REQUESTED_DIAGNOSTICS');
     this.cancelDiagnostics();
     const geterrTokenSource = new lsp.CancellationTokenSource();
     this.diagnosticsTokenSource = geterrTokenSource;
@@ -138,12 +139,12 @@ export class LspServer {
       this.diagnosticsTokenSource = undefined;
     }
   }
-  didOpenTextDocument(params: lsp.DidOpenTextDocumentParams): void {
+  async didOpenTextDocument(params: lsp.DidOpenTextDocumentParams): Promise<void> {
     const file = uriToPath(params.textDocument.uri);
     if (!file) return;
     if (this.documents.open(file, params.textDocument)) {
       this.cancelDiagnostics();
-      void this.requestDiagnostics();
+      await this.requestDiagnostics();
     } else {
 
     }
@@ -188,11 +189,22 @@ export class LspServer {
       // TODO: should we re-synth?
     }
     this.cancelDiagnostics();
-    void this.requestDiagnostics();
+    // void this.requestDiagnostics();
   }
 
-  didSaveTextDocument(_params: lsp.DidSaveTextDocumentParams): void {
-    // TODO: should we re-synth?
+  async didSaveTextDocument(_params: lsp.DidSaveTextDocumentParams): Promise<void> {
+    console.error('didSaveDocument');
+    this.cancelDiagnostics();
+    this.cdk.clear();
+    this.documents.files.forEach(file => {
+      this.diagnosticQueue?.updateDiagnostics(file, []);
+      this.options.lspClient.publishDiagnostics({
+        diagnostics: [],
+        uri: pathToUri(file, this.documents),
+      });
+    });
+    await this.cdk.synth();
+    // await this.requestDiagnostics();
   }
 
   public async codeAction(params: lsp.CodeActionParams, _token?: lsp.CancellationToken): Promise<lsp.CodeAction[]> {
@@ -246,7 +258,7 @@ export class LspServer {
     };
     const start = position;
     const nodeTree = this.cdk.getNodeResources(uri, {
-      character: start.character,
+      character: 0,
       line: start.line,
     }, uriGenerator);
     return nodeTree;

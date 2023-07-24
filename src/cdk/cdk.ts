@@ -44,8 +44,7 @@ export class Cdk {
     if (this._report) {
       return this._report;
     }
-    await this.getReport();
-    if (!this._report) await this.synth();
+    await this.synth();
     return this._report;
   }
 
@@ -216,6 +215,7 @@ export class Cdk {
       return [];
     }
     const calls: lsp.LocationLink[] = [];
+    const seen = new Set<string>();
     const children: typeof node.children = {
       [node.id]: node,
       ...node.children,
@@ -229,7 +229,11 @@ export class Cdk {
         if (logicalId) {
           templateResourceLineNumbers.get(logicalId);
           for (const value of templateResourceLineNumbers.values()) {
-            calls.push(resourceToTypeHierarchyItem(value, uriGenerator));
+            const id = `${value.name}:${value.range.start.line}`;
+            if (!seen.has(id)) {
+              calls.push(resourceToTypeHierarchyItem(value, uriGenerator));
+              seen.add(id);
+            }
           }
           if (child.children) {
             getChildResources(child.children);
@@ -267,7 +271,6 @@ export class Cdk {
       });
     }
     children({ [node.id]: node });
-    console.error(calls);
     return calls;
   }
 
@@ -299,12 +302,10 @@ export class Cdk {
       });
     }
     children({ [node.id]: node });
-    console.error(calls);
     return Array.from(calls);
   }
 
   private resourceToLocationLink(resource: TemplateInfo, uriGenerator: (file: string) => string): lsp.LocationLink {
-    console.error('RESOURCE_RANGE', resource.range);
     return {
       targetRange: resource.range,
       targetSelectionRange: resource.range,
@@ -346,22 +347,27 @@ export class Cdk {
 
   public async synth(): Promise<void> {
     try {
-      execSync([
-        'npx', 'cdk', 'synth',
-        '--context', '@aws-cdk/core:validationReportJson=true',
-        '--debug',
-        '--output', this.out,
-        '--quiet',
-        '--no-lookups',
-      ].join(' '), {
-        cwd: this.dir,
-      });
-    } finally {
+      await this.getReport();
+      if (!this._report) {
+        execSync([
+          'npx', 'cdk', 'synth',
+          '--context', '@aws-cdk/core:validationReportJson=true',
+          '--debug',
+          '--output', this.out,
+          '--quiet',
+          '--no-lookups',
+        ].join(' '), {
+          cwd: this.dir,
+        });
+      }
+
+    } catch {} finally {
+      this.clear();
+      await this.getReport();
       const tree = this.parseTree();
       this.traceTree = this.parseManifest();
       this.parseTemplates();
       this.tree = new Tree(tree, this.traceTree);
-      await this.getReport();
     }
   }
 
